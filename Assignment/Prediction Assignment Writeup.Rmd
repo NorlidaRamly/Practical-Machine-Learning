@@ -1,0 +1,135 @@
+---
+title: "Practical Machine Learning - Prediction Assignment Writeup"
+author: "Norlida Ramly"
+date: "February 14, 2016"
+output: html_document
+---
+
+
+**INTRODUCTION**  
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+
+**BUILT THE MODEL**
+
+**Download Data**  
+The training data for this project are available here:  
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv  
+  
+The test data are available here:  
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv  
+
+**Loading Library**  
+```{r}
+setwd("D:/Data_Norlida/Data_Science/Module8/Assignment")
+library(data.table)
+library(caret)
+library(randomForest)
+library(foreach)
+library(rpart)
+library(rpart.plot)
+library(corrplot)
+library(e1071)
+```
+
+**Reading data training and testing**  
+```{r}
+training_data <- read.csv("pml-training.csv", na.strings=c("#DIV/0!"," ", "", "NA", "NAs", "NULL"))
+testing_data <- read.csv("pml-testing.csv", na.strings=c("#DIV/0!"," ", "", "NA", "NAs", "NULL"))
+dim(training_data)
+dim(testing_data)
+```
+The training data has 19622 rows whereas testing data has 20 rows.  Both dataset have 160 column (variable).
+
+**Cleaning Data - Part1**  
+From observation there are many columns that have NAs.  So this column need to be removed.
+Check column with NAs and remove them.  
+```{r}
+training_data <- training_data[, colSums(is.na(training_data)) == 0] 
+testing_data <- testing_data[, colSums(is.na(testing_data)) == 0] 
+dim(training_data)
+dim(testing_data)
+```
+Now each dataset only has 60 columns (variable)
+
+**Cleaning Data - Part2**  
+The goal of the analysis is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants.
+However from the 60 column(variable), there are columns(variables) not related to accelerometers.  Thus remove these.
+```{r}
+clean_training <- training_data[, -which(names(training_data) %in% 
+  c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", 
+  "cvtd_timestamp", "new_window", "num_window"))]
+clean_testing <- testing_data[, -which(names(testing_data) %in% 
+  c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", 
+  "cvtd_timestamp", "new_window", "num_window"))]
+dim(clean_training)
+dim(clean_testing)
+```
+Now each dataset only have 53 columns(variables)
+
+Variables/Predictors must not highly correlated because both explain the same thing.  
+Thus remove either one.
+Remove variables with 0 or near to 0 variance - Clean_training
+```{r}
+zero_variance =nearZeroVar(clean_training[sapply(clean_training, is.numeric)], saveMetrics=TRUE)
+clean_training = clean_training[, zero_variance[, 'nzv'] == 0]
+
+correlation_matrix <- cor(na.omit(clean_training[sapply(clean_training, is.numeric)]))
+
+dim(correlation_matrix)
+correlationmatrixdegreesoffreedom <- expand.grid(row = 1:52, col = 1:52)
+#This returns the correlation matrix in matrix format
+correlationmatrixdegreesoffreedom$correlation <- as.vector(correlation_matrix)
+removehighcorrelation <- findCorrelation(correlation_matrix, cutoff = .7, verbose = TRUE)
+#This removes highly correlated variables (in psychometric theory .7+ correlation is a high correlation)
+clean_training <- clean_training[, -removehighcorrelation] 
+for(i in c(8:ncol(clean_training)-1)) {clean_training[,i] = as.numeric(as.character(clean_training[,i]))}
+dim(clean_training)
+```
+Now clean_training dataset only have 31 columns(variables).  
+When the data is clean and the model can be build.
+
+**Cross validation**
+Split the clean_training to 2 sample, training (70%) and validation (30%) for cross-validation.
+```{r}
+set.seed(22519)
+inTrain <- createDataPartition(clean_training$classe, p=0.70, list=F)
+trainData <- clean_training[inTrain, ]
+testData <- clean_training[-inTrain, ]
+```
+
+**Data Modeling**  
+Predictive model for activity recognition using Random Forest algorithm.
+Use 5-fold cross validation
+```{r}
+controlRf <- trainControl(method="cv", 5)
+modelRf <- train(classe ~ ., data=trainData, method="rf", trControl=controlRf, ntree=250)
+modelRf
+```
+
+**Predict the performance of the model on the validation dataset**
+```{r}
+predictRf <- predict(modelRf, testData)
+confusionMatrix(testData$classe, predictRf)
+
+accuracy <- postResample(predictRf, testData$classe)
+accuracy
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+oose
+
+result <- predict(modelRf, trainData[, -length(names(trainData))])
+
+
+treeModel <- rpart(classe ~ ., data=clean_training, method="class")
+prp(treeModel) 
+```
+
+**CONCLUSION**  
+From the above result and confusion matrix the proposed model is accurate.
+The estimated accuracy of the model is 98.81% and the estimated out-of-sample error is 1.19%.
+Thus can proceed to predict 20 different test cases.
+```{r}
+result <- predict(modelRf, clean_testing[, -length(names(clean_testing))])
+result
+```
